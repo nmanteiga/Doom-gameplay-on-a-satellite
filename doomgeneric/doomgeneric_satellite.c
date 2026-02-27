@@ -22,8 +22,8 @@ void DG_Init() {
     servaddr.sin_port = htons(8080);
     
     
-    //servaddr.sin_addr.s_addr = inet_addr("172.20.10.2/28"); 
-    servaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    servaddr.sin_addr.s_addr = inet_addr("172.20.10.2/28"); 
+    //servaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
 }
 
 // el juego
