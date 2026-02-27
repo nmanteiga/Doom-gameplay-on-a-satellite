@@ -21,9 +21,9 @@ void DG_Init() {
     servaddr.sin_family = AF_INET;
     servaddr.sin_port = htons(8080);
     
-    // !!! IMPORTANTE: PON AQUÍ LA IP DEL LINUX DE TU COMPAÑERO !!!
+    // !!! IMPORTANTE: PON AQUÍ LA IP DEL LINUX 
     // Si estáis probando los dos scripts en el mismo ordenador (el Mac), pon "127.0.0.1"
-    servaddr.sin_addr.s_addr = inet_addr("10.20.38.13/21"); 
+    servaddr.sin_addr.s_addr = inet_addr("172.20.10.2/28"); 
 }
 
 // el juego
