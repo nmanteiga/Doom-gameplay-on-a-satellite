@@ -11,7 +11,9 @@ sock.bind((UDP_IP, UDP_PORT))
 print("[ESTACIÓN TERRENA] Antena desplegada. Escuchando en el puerto 8080...")
 
 while True:
-    data, addr = sock.recvfrom(65535) 
+    data, addr = sock.recvfrom(65535)
+
+    print(f"Paquete recibido: {len(data)} bytes desde {addr}")
     
     if len(data) == 64000:
         # convertimos los bytes a una matriz de imagen
