@@ -21,26 +21,37 @@ void DG_Init() {
     servaddr.sin_family = AF_INET;
     servaddr.sin_port = htons(8080);
     
-    // !!! IMPORTANTE: PON AQUÍ LA IP DEL LINUX 
-    // Si estáis probando los dos scripts en el mismo ordenador (el Mac), pon "127.0.0.1"
-    servaddr.sin_addr.s_addr = inet_addr("172.20.10.2/28"); 
+    
+    //servaddr.sin_addr.s_addr = inet_addr("172.20.10.2/28"); 
+    servaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
 }
 
 // el juego
 void DG_DrawFrame() { 
-    // creamos un buffer de 64.000 bytes (320 * 200 = 64000)
-    uint8_t buffer_comprimido[64000];
+    // buffer enano de 4000 bytes (Resolución 80x50)
+    uint8_t buffer_comprimido[4000];
+    int indice = 0;
     
-    // DG_ScreenBuffer tiene el frame original en 32 bits.
-    for (int i = 0; i < 64000; i++) {
-        buffer_comprimido[i] = (DG_ScreenBuffer[i] >> 8) & 0xFF; 
+    // leemos 1 de cada 4 píxeles (Downsampling brutal para ahorrar datos)
+    for (int y = 0; y < 200; y += 4) {
+        for (int x = 0; x < 320; x += 4) {
+            int pixel_original = (y * 320) + x;
+            buffer_comprimido[indice] = (DG_ScreenBuffer[pixel_original] >> 8) & 0xFF;
+            indice++;
+        }
     }
     
-    // enviar el paquete a la Tierra
-    sendto(sockfd, buffer_comprimido, sizeof(buffer_comprimido), 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
+    // Transmitimos a la Tierra y GUARDAMOS el resultado
+    int bytes_enviados = sendto(sockfd, buffer_comprimido, sizeof(buffer_comprimido), 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
     
-    printf("Frame transmitido (64 KB)...\n");
-    usleep(30000); // Control de FPS
+    // Comprobamos si el Mac ha matado el paquete
+    if (bytes_enviados < 0) {
+        perror("❌ ERROR en antena de bajada"); // Esto imprimirá el error real del sistema
+    } else {
+        printf("✅ Frame transmitido (%d bytes)...\n", bytes_enviados);
+    }
+    
+    usleep(30000); 
 }
 
 // funciones de tiempo (para los mobs)
