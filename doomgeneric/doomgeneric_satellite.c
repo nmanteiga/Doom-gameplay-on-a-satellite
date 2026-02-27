@@ -16,14 +16,17 @@ struct sockaddr_in servaddr;
 void DG_Init() { 
     printf("\n[SATÉLITE] Sistemas online. Inicializando antena de bajada...\n"); 
     
-    // Crear socket UDP
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    memset(&servaddr, 0, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_port = htons(8080);
     
+    const char* ip_destino = "172.20.10.2"; 
+    servaddr.sin_addr.s_addr = inet_addr(ip_destino);
     
-    servaddr.sin_addr.s_addr = inet_addr("172.20.10.2/28"); 
-    //servaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    if (servaddr.sin_addr.s_addr == INADDR_NONE) {
+        printf("❌ [CRÍTICO] Formato de IP inválido. El sistema colapsará.\n");
+    }
 }
 
 // el juego
