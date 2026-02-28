@@ -6,11 +6,15 @@
 #include <sys/time.h>
 #include <sys/socket.h>  
 #include <arpa/inet.h>   
-#include <stdint.h>      
+#include <stdint.h> 
+#include <fcntl.h>     
 
 // variables globales para el socket
 int sockfd;
 struct sockaddr_in servaddr;
+int uplink_fd;
+unsigned char tecla_en_memoria = 0;
+int esperando_soltar = 0;
 
 // inicializar el sistema y el enlace de radio
 void DG_Init() { 
@@ -27,6 +31,18 @@ void DG_Init() {
     if (servaddr.sin_addr.s_addr == INADDR_NONE) {
         printf("❌ [CRÍTICO] Formato de IP inválido. El sistema colapsará.\n");
     }
+    
+    uplink_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    struct sockaddr_in recvaddr;
+    memset(&recvaddr, 0, sizeof(recvaddr));
+    recvaddr.sin_family = AF_INET;
+    recvaddr.sin_port = htons(8081); // Escuchamos teclas en el puerto 8081
+    recvaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    
+    bind(uplink_fd, (struct sockaddr *)&recvaddr, sizeof(recvaddr));
+    fcntl(uplink_fd, F_SETFL, O_NONBLOCK); // ¡VITAL! Para no congelar el juego
+    
+    printf("\n[SATÉLITE] Sistemas online. Antenas Downlink (8080) y Uplink (8081) operativas.\n");
 }
 
 // el juego
@@ -35,8 +51,6 @@ void DG_DrawFrame() {
     uint8_t buffer_comprimido[4000];
     int indice = 0;
     
-    // CORRECCIÓN FINAL: Pantalla completa. 
-    // Saltamos de 8 en 8 para reducir 640x400 a 80x50.
     for (int y = 0; y < 400; y += 8) {
         for (int x = 0; x < 640; x += 8) {
             int pixel_original = (y * 640) + x; 
@@ -48,9 +62,9 @@ void DG_DrawFrame() {
     int bytes_enviados = sendto(sockfd, buffer_comprimido, sizeof(buffer_comprimido), 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
     
     if (bytes_enviados < 0) {
-        perror("❌ ERROR en antena de bajada"); 
+        perror("ERROR en antena de bajada"); 
     } else {
-        printf("✅ Frame transmitido (%d bytes)...\n", bytes_enviados);
+        printf("Frame transmitido (%d bytes)...\n", bytes_enviados);
     }
     
     usleep(30000); 
@@ -69,6 +83,24 @@ uint32_t DG_GetTicksMs() {
 
 // controles
 int DG_GetKey(int* pressed, unsigned char* doomKey) { 
+    if (esperando_soltar) {
+        *pressed = 0; 
+        *doomKey = tecla_en_memoria;
+        esperando_soltar = 0;
+        return 1; 
+    }
+
+    unsigned char tecla_recibida;
+    int n = recvfrom(uplink_fd, &tecla_recibida, 1, 0, NULL, NULL);
+    
+    if (n > 0) {
+        *pressed = 1; 
+        *doomKey = tecla_recibida;
+        tecla_en_memoria = tecla_recibida;
+        esperando_soltar = 1; 
+        return 1; 
+    }
+    
     return 0; 
 }
 
