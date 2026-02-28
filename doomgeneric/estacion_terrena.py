@@ -7,12 +7,16 @@ from pynput import keyboard
 
 UDP_IP = "0.0.0.0"
 UDP_PORT = 8080
-MAC_IP = "172.20.10.2" 
+MAC_IP = "172.20.10.7" 
 UPLINK_PORT = 8081
 
 sock_recv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock_recv.bind((UDP_IP, UDP_PORT))
 sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+pico_maximo_bytes = 0
+total_bytes_mision = 0
+acumulador_10_frames = 0
 
 print(f"[ESTACIÓN TERRENA] Escuchando vídeo... Listo para enviar UPLINK a {MAC_IP}")
 
@@ -83,8 +87,16 @@ try:
         if len(data) == 1 and data[0] == 253:
             contador_frames += 1
             
-            sys.stdout.write(f"\r HD DELTA | Frame: {contador_frames:05d} | Ancho de banda usado: {bytes_hd_frame:05d} bytes   ")
-            sys.stdout.flush()
+            total_bytes_mision += bytes_hd_frame
+            if bytes_hd_frame > pico_maximo_bytes:
+                pico_maximo_bytes = bytes_hd_frame
+                
+            acumulador_10_frames += bytes_hd_frame
+            if contador_frames % 10 == 0:
+                media_ui = acumulador_10_frames // 10
+                sys.stdout.write(f"\r📡 HD DELTA | Frame: {contador_frames:05d} | Ancho de banda usado: {media_ui:05d} bytes/frame   ")
+                sys.stdout.flush()
+                acumulador_10_frames = 0
             
             bytes_hd_frame = 0 
             
@@ -96,35 +108,44 @@ try:
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 print("\n[ESTACIÓN TERRENA] Cerrando...")
                 break
-
         elif data[0] < 253:
             bytes_hd_frame += len(data)
             idx = 0
             
-            # Cada bloque son exactamente 34 bytes (2 de cabecera + 32 de pixeles empaquetados)
-            while idx + 34 <= len(data):
-                block_id = (data[idx] << 8) | data[idx+1]
+            while idx + 2 <= len(data):
+                header = (data[idx] << 8) | data[idx+1]
                 idx += 2
+                
+                is_solid = (header & 0x8000) != 0
+                block_id = header & 0x7FFF
                 
                 bx = block_id % 40
                 by = block_id // 40
                 
-                pixeles_empaquetados = data[idx : idx+32]
-                idx += 32
-                
-                # Desempaquetar los 32 bytes en 64 píxeles
-                pixeles_reales = bytearray(64)
-                for i in range(32):
-                    byte_val = pixeles_empaquetados[i]
-                    # Extraemos los 4 bits y multiplicamos por 17 para restaurar el gris (ej: 15 * 17 = 255)
-                    pixeles_reales[i*2]     = (byte_val >> 4) * 17
-                    pixeles_reales[i*2 + 1] = (byte_val & 0x0F) * 17
-                
-                # Pintar el bloque 8x8 en el Framebuffer
-                for py in range(8):
-                    inicio_buffer = ((by * 8) + py) * 320 + (bx * 8)
-                    inicio_pixel = py * 8
-                    buffer_hd[inicio_buffer : inicio_buffer+8] = pixeles_reales[inicio_pixel : inicio_pixel+8]
+                if is_solid:
+                    if idx + 1 <= len(data):
+                        byte_val = data[idx]
+                        idx += 1
+                        color_real = (byte_val & 0x0F) * 17
+                        bloque_solido = bytes([color_real] * 8) 
+                        for py in range(8):
+                            inicio_buffer = ((by * 8) + py) * 320 + (bx * 8)
+                            buffer_hd[inicio_buffer : inicio_buffer+8] = bloque_solido
+                else:
+                    if idx + 32 <= len(data):
+                        pixeles_empaquetados = data[idx : idx+32]
+                        idx += 32
+                        
+                        pixeles_reales = bytearray(64)
+                        for i in range(32):
+                            byte_val = pixeles_empaquetados[i]
+                            pixeles_reales[i*2]     = (byte_val >> 4) * 17
+                            pixeles_reales[i*2 + 1] = (byte_val & 0x0F) * 17
+                        
+                        for py in range(8):
+                            inicio_buffer = ((by * 8) + py) * 320 + (bx * 8)
+                            inicio_pixel = py * 8
+                            buffer_hd[inicio_buffer : inicio_buffer+8] = pixeles_reales[inicio_pixel : inicio_pixel+8]
 
         elif len(data) == 4001 and data[0] == 255:
             ascii_pantalla = list(data[1:].decode('ascii', errors='replace'))
@@ -144,6 +165,17 @@ except KeyboardInterrupt:
 except Exception as e:
     print(f"\n[ERROR] en la Estación Terrena: {e}")
 finally:
-    print("\033[0m") 
+    print("\033[0m")
     cv2.destroyAllWindows()
+    
+    if contador_frames > 0:
+        media_total = total_bytes_mision // contador_frames
+        print("\n" + "="*55)
+        print("REPORTE FINAL DE TELEMETRÍA (UPLINK LEO)")
+        print("="*55)
+        print(f"Frames procesados:         {contador_frames} frames")
+        print(f"Media de ancho de banda:   {media_total} bytes/frame")
+        print(f"Pico máximo registrado:    {pico_maximo_bytes} bytes/frame")
+        print("="*55 + "\n")
+        
     sys.exit(0)

@@ -43,8 +43,8 @@ void DG_Init() {
     servaddr.sin_family = AF_INET;
     servaddr.sin_port = htons(8080);
     
-    const char* ip_destino = "127.0.0.1"; 
-    //const char* ip_destino = "172.20.10.7"; 
+    //const char* ip_destino = "127.0.0.1"; 
+    const char* ip_destino = "172.20.10.2"; 
     servaddr.sin_addr.s_addr = inet_addr(ip_destino);
     
     uplink_fd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -70,66 +70,75 @@ void DG_DrawFrame() {
     }
 
     if (modo_video == 0) {
-        // --- MODO 0: HD DELTA POR BLOQUES 8x8 (DIRTY RECTANGLES) ---
         uint8_t pkt[1400];
         int pkt_size = 0;
         int es_iframe = (frame_counter % 30 == 0); 
         
-        // Recorrer los 1000 bloques (25 filas de bloques de 40 columnas)
         for (int by = 0; by < 25; by++) {
             for (int bx = 0; bx < 40; bx++) {
                 int block_id = by * 40 + bx;
                 int changed = es_iframe;
                 
-                // Comprobar si hay algún cambio en el bloque 8x8
-                if (!changed) {
+                 if (!changed) {
                     for (int py = 0; py < 8; py++) {
                         int row_offset = ((by * 8) + py) * 320 + (bx * 8);
-                        // Comparamos línea a línea del bloque (8 bytes de golpe)
-                        if (memcmp(buffer_comprimido + row_offset, buffer_anterior_hd + row_offset, 8) != 0) {
-                            changed = 1;
-                            break;
+                        for (int px = 0; px < 8; px++) {
+                            if ((buffer_comprimido[row_offset + px] & 0xF0) != (buffer_anterior_hd[row_offset + px] & 0xF0)) {
+                                changed = 1;
+                                break;
+                            }
                         }
+                        if (changed) break; 
                     }
                 }
+
                 
-                // Si el bloque ha cambiado, lo empaquetamos a 4-bits
                 if (changed) {
-                    // Cada bloque requiere: 2 bytes de ID + 32 bytes de píxeles = 34 bytes.
+                    uint8_t primer_pixel = buffer_comprimido[(by * 8) * 320 + (bx * 8)] >> 4;
+                    int es_solido = 1;
+                    for (int py = 0; py < 8; py++) {
+                        int row_offset = ((by * 8) + py) * 320 + (bx * 8);
+                        for (int px = 0; px < 8; px++) {
+                            if ((buffer_comprimido[row_offset + px] >> 4) != primer_pixel) {
+                                es_solido = 0; break;
+                            }
+                        }
+                        if (!es_solido) break;
+                    }
+
                     if (pkt_size + 34 > 1000) {
                         sendto(sockfd, pkt, pkt_size, 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
                         pkt_size = 0;
                     }
                     
-                    // Byte 0 y 1: ID del bloque
-                    pkt[pkt_size++] = (block_id >> 8) & 0xFF;
-                    pkt[pkt_size++] = block_id & 0xFF;
-                    
-                    // Copiar 64 píxeles empaquetándolos en 32 bytes (2 píxeles por byte)
-                    for (int py = 0; py < 8; py++) {
-                        int row_offset = ((by * 8) + py) * 320 + (bx * 8);
-                        for (int px = 0; px < 8; px += 2) {
-                            // Cogemos el brillo (0-255) y lo bajamos a 4 bits (0-15)
-                            uint8_t p1 = buffer_comprimido[row_offset + px] >> 4;
-                            uint8_t p2 = buffer_comprimido[row_offset + px + 1] >> 4;
-                            
-                            // Unimos los dos valores de 4 bits en 1 solo byte de 8 bits
-                            pkt[pkt_size++] = (p1 << 4) | p2;
+                    if (es_solido) {
+                        int header = block_id | 0x8000;
+                        pkt[pkt_size++] = (header >> 8) & 0xFF;
+                        pkt[pkt_size++] = header & 0xFF;
+                        pkt[pkt_size++] = primer_pixel; 
+                    } else {
+                        int header = block_id;
+                        pkt[pkt_size++] = (header >> 8) & 0xFF;
+                        pkt[pkt_size++] = header & 0xFF;
+                        
+                        for (int py = 0; py < 8; py++) {
+                            int row_offset = ((by * 8) + py) * 320 + (bx * 8);
+                            for (int px = 0; px < 8; px += 2) {
+                                uint8_t p1 = buffer_comprimido[row_offset + px] >> 4;
+                                uint8_t p2 = buffer_comprimido[row_offset + px + 1] >> 4;
+                                pkt[pkt_size++] = (p1 << 4) | p2;
+                            }
                         }
                     }
                 }
             }
         }
         
-        // Enviar el residuo de bloques que haya quedado
         if (pkt_size > 0) {
             sendto(sockfd, pkt, pkt_size, 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
         }
-        
-        // Fin del frame
         uint8_t eof_pkt[1] = {253};
         sendto(sockfd, eof_pkt, 1, 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
-        
         memcpy(buffer_anterior_hd, buffer_comprimido, 64000);
 
     } else {
@@ -145,13 +154,18 @@ void DG_DrawFrame() {
             }
         }
 
-        if (frame_counter % 30 == 0) {
+        int cambios = 0;
+        for (int i = 0; i < 4000; i++) {
+            if (ascii_buffer[i] != buffer_anterior[i]) cambios++;
+        }
+
+        if (frame_counter % 30 == 0 || (cambios * 3) > 4000) {
             uint8_t pkt[4001];
             pkt[0] = 255; 
             memcpy(&pkt[1], ascii_buffer, 4000);
             sendto(sockfd, pkt, 4001, 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
             memcpy(buffer_anterior, ascii_buffer, 4000);
-        } else {
+        } else if (cambios > 0) {
             uint8_t delta_pkt[8000]; 
             delta_pkt[0] = 254; 
             int d_size = 1;
@@ -168,6 +182,8 @@ void DG_DrawFrame() {
         }
     }
     frame_counter++;
+    if (frame_counter % 2 != 0) return;
+
     usleep(30000); 
 }
 
