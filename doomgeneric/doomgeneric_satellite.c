@@ -43,7 +43,8 @@ void DG_Init() {
     servaddr.sin_family = AF_INET;
     servaddr.sin_port = htons(8080);
     
-    const char* ip_destino = "127.0.0.1"; 
+    //const char* ip_destino = "127.0.0.1"; 
+    const char* ip_destino = "172.20.10.2"; 
     servaddr.sin_addr.s_addr = inet_addr(ip_destino);
     
     uplink_fd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -69,7 +70,6 @@ void DG_DrawFrame() {
     }
 
     if (modo_video == 0) {
-        // --- MODO 0: HD DELTA POR FILAS ---
         uint8_t pkt[8000];
         int pkt_size = 0;
         int es_iframe = (frame_counter % 30 == 0); 
