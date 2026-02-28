@@ -20,6 +20,10 @@ int uplink_fd;
 unsigned char tecla_en_memoria = 0;
 int esperando_soltar = 0;
 
+int modo_video = 0; // 0 = modo HD ventana, 1 = modo ASCII terminal
+int frame_counter = 0;
+char buffer_anterior[4000];
+
 KeyEvent key_queue[MAX_EVENTS];
 int q_head = 0;
 int q_tail = 0;
@@ -47,8 +51,8 @@ void DG_Init() {
     servaddr.sin_family = AF_INET;
     servaddr.sin_port = htons(8080);
     
-    //const char* ip_destino = "127.0.0.1"; 
-    const char* ip_destino = "172.20.10.2"; 
+    const char* ip_destino = "127.0.0.1"; 
+    //const char* ip_destino = "172.20.10.2"; 
     servaddr.sin_addr.s_addr = inet_addr(ip_destino);
     
     uplink_fd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -72,25 +76,54 @@ void DG_DrawFrame() {
     for (int y = 0; y < 400; y += 2) {
         for (int x = 0; x < 640; x += 2) {
             int pixel_original = (y * 640) + x; 
-            buffer_comprimido[indice] = (DG_ScreenBuffer[pixel_original] >> 8) & 0xFF;
-            indice++;
+            buffer_comprimido[indice++] = (DG_ScreenBuffer[pixel_original] >> 8) & 0xFF;
         }
     }
-    
-    int tamaño_chunk = 8000;
-    uint8_t paquete_udp[8001]; 
 
-    for (int i = 0; i < 8; i++) {
-        paquete_udp[0] = i; // CABECERA DE TELEMETRÍA
+    if (modo_video == 0) {
+        int tamaño_chunk = 8000;
+        uint8_t paquete_udp[8001]; 
+        for (int i = 0; i < 8; i++) {
+            paquete_udp[0] = i; 
+            memcpy(&paquete_udp[1], buffer_comprimido + (i * tamaño_chunk), tamaño_chunk);
+            sendto(sockfd, paquete_udp, 8001, 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
+        }
+    } else {
+        char ascii_buffer[4000];
+        const char* paleta = " .:-=+*#@";
+        int idx_ascii = 0;
         
-        int offset = i * tamaño_chunk; 
-        memcpy(&paquete_udp[1], buffer_comprimido + offset, tamaño_chunk);
-        
-        sendto(sockfd, paquete_udp, sizeof(paquete_udp), 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
+        for (int y = 0; y < 400; y += 8) {
+            for (int x = 0; x < 640; x += 8) {
+                int px = (y * 640) + x;
+                int brillo = (DG_ScreenBuffer[px] >> 8) & 0xFF;
+                ascii_buffer[idx_ascii++] = paleta[(brillo * 8) / 255];
+            }
+        }
+
+        if (frame_counter % 30 == 0) {
+            uint8_t pkt[4001];
+            pkt[0] = 255; 
+            memcpy(&pkt[1], ascii_buffer, 4000);
+            sendto(sockfd, pkt, 4001, 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
+            memcpy(buffer_anterior, ascii_buffer, 4000);
+        } else {
+            uint8_t delta_pkt[8000]; 
+            delta_pkt[0] = 254; 
+            int d_size = 1;
+
+            for (int i = 0; i < 4000; i++) {
+                if (ascii_buffer[i] != buffer_anterior[i]) {
+                    delta_pkt[d_size++] = (i >> 8) & 0xFF; 
+                    delta_pkt[d_size++] = i & 0xFF;        
+                    delta_pkt[d_size++] = ascii_buffer[i];
+                    buffer_anterior[i] = ascii_buffer[i];
+                }
+            }
+            sendto(sockfd, delta_pkt, d_size, 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
+        }
+        frame_counter++;
     }
-    
-    printf("Frame transmitido en 8 fragmentos (64000 bytes)...\n");
-    
     usleep(30000); 
 }
 
@@ -123,30 +156,33 @@ int DG_GetKey(int* pressed, unsigned char* doomKey) {
     unsigned char net_cmd[2];
     int n;
 
-    // Leemos TODOS los mensajes de red acumulados (2 bytes: Estado + Letra)
     while ((n = recvfrom(uplink_fd, net_cmd, 2, 0, NULL, NULL)) == 2) {
         int is_pressed = net_cmd[0];
         unsigned char raw_key = net_cmd[1];
         
+        if (is_pressed && raw_key == 'm') {
+            modo_video = !modo_video; 
+            printf("[SATÉLITE] Cambio de Modo de Transmisión a: %d\n", modo_video);
+            continue; 
+        }
+
         unsigned char tecla_final = raw_key;
         if (raw_key == 13) tecla_final = KEY_ENTER;
-        if (raw_key == 27) tecla_final = 27; // ESC
+        if (raw_key == 27) tecla_final = 27;
 
         push_key(is_pressed, tecla_final);
     }
 
-    // Le damos a DOOM la siguiente tecla de la cola
     if (q_tail != q_head) {
         *pressed = key_queue[q_tail].pressed;
         *doomKey = key_queue[q_tail].key;
         q_tail = (q_tail + 1) % MAX_EVENTS;
         return 1;
     }
-    
     return 0; 
 }
 
-// título de la ventana (vacío porque no hay ventana)
+// título de la ventana 
 void DG_SetWindowTitle(const char * title) {}
 
 int main(int argc, char **argv) {
