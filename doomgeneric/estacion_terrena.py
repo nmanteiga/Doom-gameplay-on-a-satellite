@@ -7,7 +7,7 @@ from pynput import keyboard
 
 UDP_IP = "0.0.0.0"
 UDP_PORT = 8080
-MAC_IP = "172.20.10.7" 
+MAC_IP = "172.20.10.2" 
 UPLINK_PORT = 8081
 
 sock_recv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -90,7 +90,7 @@ try:
             
             frame = np.frombuffer(buffer_hd, dtype=np.uint8)
             frame = frame.reshape((200, 320))
-            frame_ampliado = cv2.resize(frame, (640, 400), interpolation=cv2.INTER_NEAREST)
+            frame_ampliado = cv2.resize(frame, (1280, 800), interpolation=cv2.INTER_NEAREST)
             cv2.imshow("DOOM - Enlace Satelital", frame_ampliado)
             
             if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -101,24 +101,30 @@ try:
             bytes_hd_frame += len(data)
             idx = 0
             
-            while idx < len(data):
-                fila = data[idx]
-                rle_size = (data[idx+1] << 8) | data[idx+2]
-                idx += 3
+            # Cada bloque son exactamente 34 bytes (2 de cabecera + 32 de pixeles empaquetados)
+            while idx + 34 <= len(data):
+                block_id = (data[idx] << 8) | data[idx+1]
+                idx += 2
                 
-                inicio = fila * 320
-                pixel_offset = 0
+                bx = block_id % 40
+                by = block_id // 40
                 
-                bytes_leidos = 0
-                while bytes_leidos < rle_size and idx + 1 < len(data):
-                    count = data[idx]
-                    color = data[idx+1]
-                    idx += 2
-                    bytes_leidos += 2
-                    
-                    if pixel_offset + count <= 320:
-                        buffer_hd[inicio + pixel_offset : inicio + pixel_offset + count] = bytes([color] * count)
-                        pixel_offset += count
+                pixeles_empaquetados = data[idx : idx+32]
+                idx += 32
+                
+                # Desempaquetar los 32 bytes en 64 píxeles
+                pixeles_reales = bytearray(64)
+                for i in range(32):
+                    byte_val = pixeles_empaquetados[i]
+                    # Extraemos los 4 bits y multiplicamos por 17 para restaurar el gris (ej: 15 * 17 = 255)
+                    pixeles_reales[i*2]     = (byte_val >> 4) * 17
+                    pixeles_reales[i*2 + 1] = (byte_val & 0x0F) * 17
+                
+                # Pintar el bloque 8x8 en el Framebuffer
+                for py in range(8):
+                    inicio_buffer = ((by * 8) + py) * 320 + (bx * 8)
+                    inicio_pixel = py * 8
+                    buffer_hd[inicio_buffer : inicio_buffer+8] = pixeles_reales[inicio_pixel : inicio_pixel+8]
 
         elif len(data) == 4001 and data[0] == 255:
             ascii_pantalla = list(data[1:].decode('ascii', errors='replace'))
