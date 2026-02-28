@@ -25,7 +25,8 @@ void DG_Init() {
     servaddr.sin_family = AF_INET;
     servaddr.sin_port = htons(8080);
     
-    const char* ip_destino = "172.20.10.2"; 
+    //const char* ip_destino = "172.20.10.2"; 
+    const char* ip_destino = "172.20.10.7";
     //const char* ip_destino = "127.0.0.1";
     servaddr.sin_addr.s_addr = inet_addr(ip_destino);
     
@@ -89,6 +90,7 @@ uint32_t tiempo_ultima_tecla = 0;
 unsigned char tecla_pendiente = 0; // Para hacer el cambio de tecla suave
 
 // controles
+/*
 int DG_GetKey(int* pressed, unsigned char* doomKey) { 
     if (tecla_pendiente != 0) {
         *pressed = 1;
@@ -114,6 +116,73 @@ int DG_GetKey(int* pressed, unsigned char* doomKey) {
         else if (tecla_recibida == 'f') tecla_final = KEY_FIRE;     // Disparar
         else if (tecla_recibida == 'e') tecla_final = KEY_USE;      // Usar/Abrir
         // Las demás (como ESC) pasan tal cual.
+
+        if (tecla_final != tecla_actual) {
+            if (tecla_actual != 0) {
+                *pressed = 0;
+                *doomKey = tecla_actual;
+                tecla_pendiente = tecla_final; 
+                tecla_actual = 0;
+                return 1; 
+            } else {
+                *pressed = 1;
+                *doomKey = tecla_final;
+                tecla_actual = tecla_final;
+                return 1;
+            }
+        }
+        return 0; 
+        
+    } else {
+        if (tecla_actual != 0) {
+            if ((DG_GetTicksMs() - tiempo_ultima_tecla) > 150) {
+                *pressed = 0; 
+                *doomKey = tecla_actual;
+                tecla_actual = 0;
+                return 1;
+            }
+        }
+    }
+
+    return 0; 
+}
+*/
+
+int DG_GetKey(int* pressed, unsigned char* doomKey) { 
+    if (tecla_pendiente != 0) {
+        *pressed = 1;
+        *doomKey = tecla_pendiente;
+        tecla_actual = tecla_pendiente;
+        tecla_pendiente = 0;
+        tiempo_ultima_tecla = DG_GetTicksMs();
+        return 1;
+    }
+
+    unsigned char tecla_recibida;
+    unsigned char ultima_tecla = 0;
+    int paquetes_leidos = 0;
+    int n;
+
+    // 🚀 DRENAMOS EL BÚFER: Leemos todos los paquetes acumulados de golpe
+    while ((n = recvfrom(uplink_fd, &tecla_recibida, 1, 0, NULL, NULL)) > 0) {
+        ultima_tecla = tecla_recibida;
+        paquetes_leidos++;
+    }
+
+    if (paquetes_leidos > 0) {
+        // RADAR: Si esta línea se imprime en tu Mac, ¡la red funciona!
+        printf("📡 UPLINK RECIBIDO DESDE LA TIERRA: código %d\n", ultima_tecla);
+        
+        tiempo_ultima_tecla = DG_GetTicksMs(); 
+        
+        unsigned char tecla_final = ultima_tecla;
+        if (ultima_tecla == 'w') tecla_final = KEY_UPARROW;
+        else if (ultima_tecla == 's') tecla_final = KEY_DOWNARROW;
+        else if (ultima_tecla == 'a') tecla_final = KEY_LEFTARROW;
+        else if (ultima_tecla == 'd') tecla_final = KEY_RIGHTARROW;
+        else if (ultima_tecla == 'f') tecla_final = KEY_RCTRL;     // Disparar
+        else if (ultima_tecla == 'e') tecla_final = ' ';           // Usar/Abrir
+        else if (ultima_tecla == 13)  tecla_final = KEY_ENTER;
 
         if (tecla_final != tecla_actual) {
             if (tecla_actual != 0) {

@@ -7,7 +7,7 @@ import sys
 #UDP_IP = "127.0.0.1
 UDP_IP = "0.0.0.0"
 UDP_PORT = 8080
-MAC_IP = "127.0.0.1" 
+MAC_IP = "172.20.10.2" 
 UPLINK_PORT = 8081
 
 sock_recv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
