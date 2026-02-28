@@ -16,13 +16,13 @@ while True:
     print(f"¡Impacto! Recibidos {len(data)} bytes desde {addr}") 
     
     # Ahora esperamos 4000 bytes en lugar de 64000
+    # Volvemos a esperar el paquete seguro de 4000
     if len(data) == 4000:
         frame = np.frombuffer(data, dtype=np.uint8)
-        frame = frame.reshape((50, 80)) # Nueva resolución súper comprimida
+        frame = frame.reshape((50, 80)) # Matriz pequeña
+        
+        # El escalado hace la magia de rellenar la pantalla
         frame_ampliado = cv2.resize(frame, (640, 400), interpolation=cv2.INTER_NEAREST)
         cv2.imshow("DOOM - Enlace Satelital", frame_ampliado)
-        
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
 
 cv2.destroyAllWindows()

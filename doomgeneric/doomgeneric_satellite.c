@@ -31,25 +31,24 @@ void DG_Init() {
 
 // el juego
 void DG_DrawFrame() { 
-    // buffer enano de 4000 bytes (Resolución 80x50)
+    // Volvemos a los 4000 bytes seguros
     uint8_t buffer_comprimido[4000];
     int indice = 0;
     
-    // leemos 1 de cada 4 píxeles (Downsampling brutal para ahorrar datos)
-    for (int y = 0; y < 200; y += 4) {
-        for (int x = 0; x < 320; x += 4) {
-            int pixel_original = (y * 320) + x;
+    // CORRECCIÓN FINAL: Pantalla completa. 
+    // Saltamos de 8 en 8 para reducir 640x400 a 80x50.
+    for (int y = 0; y < 400; y += 8) {
+        for (int x = 0; x < 640; x += 8) {
+            int pixel_original = (y * 640) + x; 
             buffer_comprimido[indice] = (DG_ScreenBuffer[pixel_original] >> 8) & 0xFF;
             indice++;
         }
     }
     
-    // Transmitimos a la Tierra y GUARDAMOS el resultado
     int bytes_enviados = sendto(sockfd, buffer_comprimido, sizeof(buffer_comprimido), 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
     
-    // Comprobamos si el Mac ha matado el paquete
     if (bytes_enviados < 0) {
-        perror("❌ ERROR en antena de bajada"); // Esto imprimirá el error real del sistema
+        perror("❌ ERROR en antena de bajada"); 
     } else {
         printf("✅ Frame transmitido (%d bytes)...\n", bytes_enviados);
     }
