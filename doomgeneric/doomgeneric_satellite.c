@@ -26,6 +26,7 @@ void DG_Init() {
     servaddr.sin_port = htons(8080);
     
     const char* ip_destino = "172.20.10.2"; 
+    //const char* ip_destino = "127.0.0.1";
     servaddr.sin_addr.s_addr = inet_addr(ip_destino);
     
     if (servaddr.sin_addr.s_addr == INADDR_NONE) {
@@ -82,25 +83,65 @@ uint32_t DG_GetTicksMs() {
 }
 
 // controles
+// --- Variables Globales Inteligentes para los Controles ---
+unsigned char tecla_actual = 0;
+uint32_t tiempo_ultima_tecla = 0;
+unsigned char tecla_pendiente = 0; // Para hacer el cambio de tecla suave
+
+// controles
 int DG_GetKey(int* pressed, unsigned char* doomKey) { 
-    if (esperando_soltar) {
-        *pressed = 0; 
-        *doomKey = tecla_en_memoria;
-        esperando_soltar = 0;
-        return 1; 
+    if (tecla_pendiente != 0) {
+        *pressed = 1;
+        *doomKey = tecla_pendiente;
+        tecla_actual = tecla_pendiente;
+        tecla_pendiente = 0;
+        tiempo_ultima_tecla = DG_GetTicksMs();
+        return 1;
     }
 
     unsigned char tecla_recibida;
     int n = recvfrom(uplink_fd, &tecla_recibida, 1, 0, NULL, NULL);
-    
+
     if (n > 0) {
-        *pressed = 1; 
-        *doomKey = tecla_recibida;
-        tecla_en_memoria = tecla_recibida;
-        esperando_soltar = 1; 
-        return 1; 
+        tiempo_ultima_tecla = DG_GetTicksMs(); 
+        
+        // --- TRADUCTOR MÍNIMO ---
+        unsigned char tecla_final = tecla_recibida;
+        if (tecla_recibida == 'w') tecla_final = KEY_UPARROW;
+        else if (tecla_recibida == 's') tecla_final = KEY_DOWNARROW;
+        else if (tecla_recibida == 'a') tecla_final = KEY_LEFTARROW;
+        else if (tecla_recibida == 'd') tecla_final = KEY_RIGHTARROW;
+        else if (tecla_recibida == 'f') tecla_final = KEY_FIRE;     // Disparar
+        else if (tecla_recibida == 'e') tecla_final = KEY_USE;      // Usar/Abrir
+        // Las demás (como ESC) pasan tal cual.
+
+        if (tecla_final != tecla_actual) {
+            if (tecla_actual != 0) {
+                *pressed = 0;
+                *doomKey = tecla_actual;
+                tecla_pendiente = tecla_final; 
+                tecla_actual = 0;
+                return 1; 
+            } else {
+                *pressed = 1;
+                *doomKey = tecla_final;
+                tecla_actual = tecla_final;
+                return 1;
+            }
+        }
+        return 0; 
+        
+    } else {
+        if (tecla_actual != 0) {
+            if ((DG_GetTicksMs() - tiempo_ultima_tecla) > 150) {
+                *pressed = 0; 
+                *doomKey = tecla_actual;
+                tecla_actual = 0;
+                return 1;
+            }
+        }
     }
-    
+
     return 0; 
 }
 
