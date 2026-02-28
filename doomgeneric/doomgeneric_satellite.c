@@ -10,12 +10,19 @@
 #include <fcntl.h> 
 #include <string.h> // para que funcione en arch    
 
+#define MAX_EVENTS 64
+typedef struct { int pressed; unsigned char key; } KeyEvent;
+
 // variables globales para el socket
 int sockfd;
 struct sockaddr_in servaddr;
 int uplink_fd;
 unsigned char tecla_en_memoria = 0;
 int esperando_soltar = 0;
+
+KeyEvent key_queue[MAX_EVENTS];
+int q_head = 0;
+int q_tail = 0;
 
 extern int key_up;
 extern int key_down;
@@ -41,6 +48,7 @@ void DG_Init() {
     servaddr.sin_port = htons(8080);
     
     const char* ip_destino = "127.0.0.1"; 
+    //const char* ip_destino = "172.20.10.7"; 
     servaddr.sin_addr.s_addr = inet_addr(ip_destino);
     
     uplink_fd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -56,7 +64,6 @@ void DG_Init() {
     printf("\n[SATÉLITE] Sistemas online. Antenas operativas.\n");
 }
 
-// eljuego
 // el juego
 void DG_DrawFrame() { 
     uint8_t buffer_comprimido[64000];
@@ -71,10 +78,15 @@ void DG_DrawFrame() {
     }
     
     int tamaño_chunk = 8000;
-    for (int i = 0; i < 8; i++) {
-        int offset = i * tamaño_chunk; 
+    uint8_t paquete_udp[8001]; 
 
-        sendto(sockfd, buffer_comprimido + offset, tamaño_chunk, 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
+    for (int i = 0; i < 8; i++) {
+        paquete_udp[0] = i; // CABECERA DE TELEMETRÍA
+        
+        int offset = i * tamaño_chunk; 
+        memcpy(&paquete_udp[1], buffer_comprimido + offset, tamaño_chunk);
+        
+        sendto(sockfd, paquete_udp, sizeof(paquete_udp), 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
     }
     
     printf("Frame transmitido en 8 fragmentos (64000 bytes)...\n");
@@ -98,59 +110,39 @@ unsigned char tecla_actual = 0;
 uint32_t tiempo_ultima_tecla = 0;
 unsigned char tecla_pendiente = 0;
 
+void push_key(int pressed, unsigned char key) {
+    int next = (q_head + 1) % MAX_EVENTS;
+    if (next != q_tail) { 
+        key_queue[q_head].pressed = pressed;
+        key_queue[q_head].key = key;
+        q_head = next;
+    }
+}
 
 int DG_GetKey(int* pressed, unsigned char* doomKey) { 
-    if (tecla_pendiente != 0) {
-        *pressed = 1;
-        *doomKey = tecla_pendiente;
-        tecla_actual = tecla_pendiente;
-        tecla_pendiente = 0;
-        tiempo_ultima_tecla = DG_GetTicksMs();
-        return 1;
-    }
-
-    unsigned char tecla_recibida;
-    unsigned char ultima_tecla = 0;
-    int paquetes_leidos = 0;
+    unsigned char net_cmd[2];
     int n;
 
-    while ((n = recvfrom(uplink_fd, &tecla_recibida, 1, 0, NULL, NULL)) > 0) {
-        ultima_tecla = tecla_recibida;
-        paquetes_leidos++;
+    // Leemos TODOS los mensajes de red acumulados (2 bytes: Estado + Letra)
+    while ((n = recvfrom(uplink_fd, net_cmd, 2, 0, NULL, NULL)) == 2) {
+        int is_pressed = net_cmd[0];
+        unsigned char raw_key = net_cmd[1];
+        
+        unsigned char tecla_final = raw_key;
+        if (raw_key == 13) tecla_final = KEY_ENTER;
+        if (raw_key == 27) tecla_final = 27; // ESC
+
+        push_key(is_pressed, tecla_final);
     }
 
-    if (paquetes_leidos > 0) {
-        tiempo_ultima_tecla = DG_GetTicksMs(); 
-        
-        unsigned char tecla_final = ultima_tecla; 
-        if (ultima_tecla == 13) tecla_final = KEY_ENTER; 
-
-        if (tecla_final != tecla_actual) {
-            if (tecla_actual != 0) {
-                *pressed = 0;
-                *doomKey = tecla_actual;
-                tecla_pendiente = tecla_final; 
-                tecla_actual = 0;
-                return 1; 
-            } else {
-                *pressed = 1;
-                *doomKey = tecla_final;
-                tecla_actual = tecla_final;
-                return 1;
-            }
-        }
-        return 0; 
-        
-    } else {
-        if (tecla_actual != 0) {
-            if ((DG_GetTicksMs() - tiempo_ultima_tecla) > 150) {
-                *pressed = 0; 
-                *doomKey = tecla_actual;
-                tecla_actual = 0;
-                return 1;
-            }
-        }
+    // Le damos a DOOM la siguiente tecla de la cola
+    if (q_tail != q_head) {
+        *pressed = key_queue[q_tail].pressed;
+        *doomKey = key_queue[q_tail].key;
+        q_tail = (q_tail + 1) % MAX_EVENTS;
+        return 1;
     }
+    
     return 0; 
 }
 
