@@ -8,7 +8,7 @@
 #include <arpa/inet.h>   
 #include <stdint.h> 
 #include <fcntl.h> 
-#include <string.h> // para que funcione en arch    
+#include <string.h>    
 
 #define MAX_EVENTS 64
 typedef struct { int pressed; unsigned char key; } KeyEvent;
@@ -17,12 +17,11 @@ typedef struct { int pressed; unsigned char key; } KeyEvent;
 int sockfd;
 struct sockaddr_in servaddr;
 int uplink_fd;
-unsigned char tecla_en_memoria = 0;
-int esperando_soltar = 0;
 
-int modo_video = 0; // 0 = modo HD ventana, 1 = modo ASCII terminal
+int modo_video = 0; // 0 = HD DELTA, 1 = ASCII DELTA
 int frame_counter = 0;
 char buffer_anterior[4000];
+uint8_t buffer_anterior_hd[64000] = {0};
 
 KeyEvent key_queue[MAX_EVENTS];
 int q_head = 0;
@@ -35,16 +34,9 @@ extern int key_right;
 extern int key_fire;
 extern int key_use;
 
-// inicializar el sistema y el enlace de radio
 void DG_Init() { 
-    printf("\n[SATÉLITE] Sistemas online. Inicializando antena de bajada...\n"); 
-    
-    key_up = 'w';
-    key_down = 's';
-    key_left = 'a';
-    key_right = 'd';
-    key_fire = 'f'; 
-    key_use = 'e';  
+    printf("\n[SATÉLITE] Sistemas online. Inicializando antenas...\n"); 
+    key_up = 'w'; key_down = 's'; key_left = 'a'; key_right = 'd'; key_fire = 'f'; key_use = 'e';  
 
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     memset(&servaddr, 0, sizeof(servaddr));
@@ -52,7 +44,6 @@ void DG_Init() {
     servaddr.sin_port = htons(8080);
     
     const char* ip_destino = "127.0.0.1"; 
-    //const char* ip_destino = "172.20.10.2"; 
     servaddr.sin_addr.s_addr = inet_addr(ip_destino);
     
     uplink_fd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -64,11 +55,8 @@ void DG_Init() {
     
     bind(uplink_fd, (struct sockaddr *)&recvaddr, sizeof(recvaddr));
     fcntl(uplink_fd, F_SETFL, O_NONBLOCK); 
-    
-    printf("\n[SATÉLITE] Sistemas online. Antenas operativas.\n");
 }
 
-// el juego
 void DG_DrawFrame() { 
     uint8_t buffer_comprimido[64000];
     int indice = 0;
@@ -81,13 +69,31 @@ void DG_DrawFrame() {
     }
 
     if (modo_video == 0) {
-        int tamaño_chunk = 8000;
-        uint8_t paquete_udp[8001]; 
-        for (int i = 0; i < 8; i++) {
-            paquete_udp[0] = i; 
-            memcpy(&paquete_udp[1], buffer_comprimido + (i * tamaño_chunk), tamaño_chunk);
-            sendto(sockfd, paquete_udp, 8001, 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
+        // --- MODO 0: HD DELTA POR FILAS ---
+        uint8_t pkt[8000];
+        int pkt_size = 0;
+        int es_iframe = (frame_counter % 30 == 0); 
+
+        for (int fila = 0; fila < 200; fila++) {
+            if (es_iframe || memcmp(buffer_comprimido + (fila * 320), buffer_anterior_hd + (fila * 320), 320) != 0) {
+                pkt[pkt_size++] = fila; 
+                memcpy(&pkt[pkt_size], buffer_comprimido + (fila * 320), 320);
+                pkt_size += 320;
+
+                if (pkt_size + 321 > 8000 || fila == 199) {
+                    if (pkt_size > 0) {
+                        sendto(sockfd, pkt, pkt_size, 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
+                        pkt_size = 0;
+                    }
+                }
+            }
         }
+        
+        uint8_t eof_pkt[1] = {253};
+        sendto(sockfd, eof_pkt, 1, 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
+        
+        memcpy(buffer_anterior_hd, buffer_comprimido, 64000);
+
     } else {
         char ascii_buffer[4000];
         const char* paleta = " .:-=+*#@";
@@ -122,26 +128,10 @@ void DG_DrawFrame() {
             }
             sendto(sockfd, delta_pkt, d_size, 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
         }
-        frame_counter++;
     }
+    frame_counter++;
     usleep(30000); 
 }
-
-// funciones de tiempo (para los mobs)
-void DG_SleepMs(uint32_t ms) { 
-    usleep(ms * 1000); 
-}
-
-uint32_t DG_GetTicksMs() {
-    struct timeval tp;
-    gettimeofday(&tp, NULL);
-    return tp.tv_sec * 1000 + tp.tv_usec / 1000;
-}
-
-// controles
-unsigned char tecla_actual = 0;
-uint32_t tiempo_ultima_tecla = 0;
-unsigned char tecla_pendiente = 0;
 
 void push_key(int pressed, unsigned char key) {
     int next = (q_head + 1) % MAX_EVENTS;
@@ -154,23 +144,15 @@ void push_key(int pressed, unsigned char key) {
 
 int DG_GetKey(int* pressed, unsigned char* doomKey) { 
     unsigned char net_cmd[2];
-    int n;
-
-    while ((n = recvfrom(uplink_fd, net_cmd, 2, 0, NULL, NULL)) == 2) {
-        int is_pressed = net_cmd[0];
-        unsigned char raw_key = net_cmd[1];
-        
-        if (is_pressed && raw_key == 'm') {
+    while (recvfrom(uplink_fd, net_cmd, 2, 0, NULL, NULL) == 2) {
+        if (net_cmd[0] && net_cmd[1] == 'm') {
             modo_video = !modo_video; 
-            printf("[SATÉLITE] Cambio de Modo de Transmisión a: %d\n", modo_video);
             continue; 
         }
-
-        unsigned char tecla_final = raw_key;
-        if (raw_key == 13) tecla_final = KEY_ENTER;
-        if (raw_key == 27) tecla_final = 27;
-
-        push_key(is_pressed, tecla_final);
+        unsigned char k = net_cmd[1];
+        if (k == 13) k = KEY_ENTER;
+        if (k == 27) k = 27;
+        push_key(net_cmd[0], k);
     }
 
     if (q_tail != q_head) {
@@ -182,22 +164,15 @@ int DG_GetKey(int* pressed, unsigned char* doomKey) {
     return 0; 
 }
 
-// título de la ventana 
+void DG_SleepMs(uint32_t ms) { usleep(ms * 1000); }
+uint32_t DG_GetTicksMs() {
+    struct timeval tp; gettimeofday(&tp, NULL);
+    return tp.tv_sec * 1000 + tp.tv_usec / 1000;
+}
 void DG_SetWindowTitle(const char * title) {}
 
 int main(int argc, char **argv) {
-    printf("[SATÉLITE] Arrancando motor DOOM...\n");
     doomgeneric_Create(argc, argv);
-    
-    while (1) { // bucle de juego 
-        doomgeneric_Tick(); // calcula la física y llama a DG_DrawFrame
-    }
-    
+    while (1) { doomgeneric_Tick(); }
     return 0;
 }
-
-
-/*
-gcc -O2 -I . $(find . -maxdepth 1 -name "*.c" ! -name "doomgeneric_*.c" ! -name "i_sdl*.c" ! -name "i_allegro*.c") doomgeneric_satellite.c -o doom_satellite
-./doom_satellite -iwad DOOM1.WAD
-*/
