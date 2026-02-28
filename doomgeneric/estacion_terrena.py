@@ -26,6 +26,7 @@ def send_key_event(pressed, key_char):
             estado = 1 if pressed else 0
             sock_send.sendto(bytes([estado, key_char]), (MAC_IP, UPLINK_PORT))
             
+            # --- EL CHIVATO ---
             accion = "PULSADA" if pressed else "SOLTADA"
             print(f"📡 Enviando tecla: {chr(key_char).upper()} -> {accion}")
             
