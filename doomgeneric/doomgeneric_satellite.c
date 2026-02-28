@@ -7,7 +7,8 @@
 #include <sys/socket.h>  
 #include <arpa/inet.h>   
 #include <stdint.h> 
-#include <fcntl.h>     
+#include <fcntl.h> 
+#include <string.h> // para que funcione en arch    
 
 // variables globales para el socket
 int sockfd;
@@ -16,58 +17,67 @@ int uplink_fd;
 unsigned char tecla_en_memoria = 0;
 int esperando_soltar = 0;
 
+extern int key_up;
+extern int key_down;
+extern int key_left;
+extern int key_right;
+extern int key_fire;
+extern int key_use;
+
 // inicializar el sistema y el enlace de radio
 void DG_Init() { 
     printf("\n[SATÉLITE] Sistemas online. Inicializando antena de bajada...\n"); 
     
+    key_up = 'w';
+    key_down = 's';
+    key_left = 'a';
+    key_right = 'd';
+    key_fire = 'f'; 
+    key_use = 'e';  
+
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     memset(&servaddr, 0, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_port = htons(8080);
     
-    //const char* ip_destino = "172.20.10.2"; 
-    const char* ip_destino = "172.20.10.7";
-    //const char* ip_destino = "127.0.0.1";
+    const char* ip_destino = "127.0.0.1"; 
     servaddr.sin_addr.s_addr = inet_addr(ip_destino);
-    
-    if (servaddr.sin_addr.s_addr == INADDR_NONE) {
-        printf("❌ [CRÍTICO] Formato de IP inválido. El sistema colapsará.\n");
-    }
     
     uplink_fd = socket(AF_INET, SOCK_DGRAM, 0);
     struct sockaddr_in recvaddr;
     memset(&recvaddr, 0, sizeof(recvaddr));
     recvaddr.sin_family = AF_INET;
-    recvaddr.sin_port = htons(8081); // Escuchamos teclas en el puerto 8081
+    recvaddr.sin_port = htons(8081); 
     recvaddr.sin_addr.s_addr = htonl(INADDR_ANY);
     
     bind(uplink_fd, (struct sockaddr *)&recvaddr, sizeof(recvaddr));
-    fcntl(uplink_fd, F_SETFL, O_NONBLOCK); // ¡VITAL! Para no congelar el juego
+    fcntl(uplink_fd, F_SETFL, O_NONBLOCK); 
     
-    printf("\n[SATÉLITE] Sistemas online. Antenas Downlink (8080) y Uplink (8081) operativas.\n");
+    printf("\n[SATÉLITE] Sistemas online. Antenas operativas.\n");
 }
 
+// eljuego
 // el juego
 void DG_DrawFrame() { 
-    // Volvemos a los 4000 bytes seguros
-    uint8_t buffer_comprimido[4000];
+    uint8_t buffer_comprimido[64000];
     int indice = 0;
     
-    for (int y = 0; y < 400; y += 8) {
-        for (int x = 0; x < 640; x += 8) {
+    for (int y = 0; y < 400; y += 2) {
+        for (int x = 0; x < 640; x += 2) {
             int pixel_original = (y * 640) + x; 
             buffer_comprimido[indice] = (DG_ScreenBuffer[pixel_original] >> 8) & 0xFF;
             indice++;
         }
     }
     
-    int bytes_enviados = sendto(sockfd, buffer_comprimido, sizeof(buffer_comprimido), 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
-    
-    if (bytes_enviados < 0) {
-        perror("ERROR en antena de bajada"); 
-    } else {
-        printf("Frame transmitido (%d bytes)...\n", bytes_enviados);
+    int tamaño_chunk = 8000;
+    for (int i = 0; i < 8; i++) {
+        int offset = i * tamaño_chunk; 
+
+        sendto(sockfd, buffer_comprimido + offset, tamaño_chunk, 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
     }
+    
+    printf("Frame transmitido en 8 fragmentos (64000 bytes)...\n");
     
     usleep(30000); 
 }
@@ -84,69 +94,10 @@ uint32_t DG_GetTicksMs() {
 }
 
 // controles
-// --- Variables Globales Inteligentes para los Controles ---
 unsigned char tecla_actual = 0;
 uint32_t tiempo_ultima_tecla = 0;
-unsigned char tecla_pendiente = 0; // Para hacer el cambio de tecla suave
+unsigned char tecla_pendiente = 0;
 
-// controles
-/*
-int DG_GetKey(int* pressed, unsigned char* doomKey) { 
-    if (tecla_pendiente != 0) {
-        *pressed = 1;
-        *doomKey = tecla_pendiente;
-        tecla_actual = tecla_pendiente;
-        tecla_pendiente = 0;
-        tiempo_ultima_tecla = DG_GetTicksMs();
-        return 1;
-    }
-
-    unsigned char tecla_recibida;
-    int n = recvfrom(uplink_fd, &tecla_recibida, 1, 0, NULL, NULL);
-
-    if (n > 0) {
-        tiempo_ultima_tecla = DG_GetTicksMs(); 
-        
-        // --- TRADUCTOR MÍNIMO ---
-        unsigned char tecla_final = tecla_recibida;
-        if (tecla_recibida == 'w') tecla_final = KEY_UPARROW;
-        else if (tecla_recibida == 's') tecla_final = KEY_DOWNARROW;
-        else if (tecla_recibida == 'a') tecla_final = KEY_LEFTARROW;
-        else if (tecla_recibida == 'd') tecla_final = KEY_RIGHTARROW;
-        else if (tecla_recibida == 'f') tecla_final = KEY_FIRE;     // Disparar
-        else if (tecla_recibida == 'e') tecla_final = KEY_USE;      // Usar/Abrir
-        // Las demás (como ESC) pasan tal cual.
-
-        if (tecla_final != tecla_actual) {
-            if (tecla_actual != 0) {
-                *pressed = 0;
-                *doomKey = tecla_actual;
-                tecla_pendiente = tecla_final; 
-                tecla_actual = 0;
-                return 1; 
-            } else {
-                *pressed = 1;
-                *doomKey = tecla_final;
-                tecla_actual = tecla_final;
-                return 1;
-            }
-        }
-        return 0; 
-        
-    } else {
-        if (tecla_actual != 0) {
-            if ((DG_GetTicksMs() - tiempo_ultima_tecla) > 150) {
-                *pressed = 0; 
-                *doomKey = tecla_actual;
-                tecla_actual = 0;
-                return 1;
-            }
-        }
-    }
-
-    return 0; 
-}
-*/
 
 int DG_GetKey(int* pressed, unsigned char* doomKey) { 
     if (tecla_pendiente != 0) {
@@ -163,26 +114,16 @@ int DG_GetKey(int* pressed, unsigned char* doomKey) {
     int paquetes_leidos = 0;
     int n;
 
-    // 🚀 DRENAMOS EL BÚFER: Leemos todos los paquetes acumulados de golpe
     while ((n = recvfrom(uplink_fd, &tecla_recibida, 1, 0, NULL, NULL)) > 0) {
         ultima_tecla = tecla_recibida;
         paquetes_leidos++;
     }
 
     if (paquetes_leidos > 0) {
-        // RADAR: Si esta línea se imprime en tu Mac, ¡la red funciona!
-        printf("📡 UPLINK RECIBIDO DESDE LA TIERRA: código %d\n", ultima_tecla);
-        
         tiempo_ultima_tecla = DG_GetTicksMs(); 
         
-        unsigned char tecla_final = ultima_tecla;
-        if (ultima_tecla == 'w') tecla_final = KEY_UPARROW;
-        else if (ultima_tecla == 's') tecla_final = KEY_DOWNARROW;
-        else if (ultima_tecla == 'a') tecla_final = KEY_LEFTARROW;
-        else if (ultima_tecla == 'd') tecla_final = KEY_RIGHTARROW;
-        else if (ultima_tecla == 'f') tecla_final = KEY_RCTRL;     // Disparar
-        else if (ultima_tecla == 'e') tecla_final = ' ';           // Usar/Abrir
-        else if (ultima_tecla == 13)  tecla_final = KEY_ENTER;
+        unsigned char tecla_final = ultima_tecla; 
+        if (ultima_tecla == 13) tecla_final = KEY_ENTER; 
 
         if (tecla_final != tecla_actual) {
             if (tecla_actual != 0) {
@@ -210,7 +151,6 @@ int DG_GetKey(int* pressed, unsigned char* doomKey) {
             }
         }
     }
-
     return 0; 
 }
 
