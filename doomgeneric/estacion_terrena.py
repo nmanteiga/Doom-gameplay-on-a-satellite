@@ -100,15 +100,25 @@ try:
         elif data[0] < 253:
             bytes_hd_frame += len(data)
             idx = 0
+            
             while idx < len(data):
                 fila = data[idx]
-                idx += 1
-                pixeles = data[idx : idx+320]
-                idx += 320
+                rle_size = (data[idx+1] << 8) | data[idx+2]
+                idx += 3
                 
                 inicio = fila * 320
-                if inicio + 320 <= 64000:
-                    buffer_hd[inicio : inicio+320] = pixeles
+                pixel_offset = 0
+                
+                bytes_leidos = 0
+                while bytes_leidos < rle_size and idx + 1 < len(data):
+                    count = data[idx]
+                    color = data[idx+1]
+                    idx += 2
+                    bytes_leidos += 2
+                    
+                    if pixel_offset + count <= 320:
+                        buffer_hd[inicio + pixel_offset : inicio + pixel_offset + count] = bytes([color] * count)
+                        pixel_offset += count
 
         elif len(data) == 4001 and data[0] == 255:
             ascii_pantalla = list(data[1:].decode('ascii', errors='replace'))

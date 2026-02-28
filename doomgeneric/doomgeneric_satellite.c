@@ -44,7 +44,7 @@ void DG_Init() {
     servaddr.sin_port = htons(8080);
     
     //const char* ip_destino = "127.0.0.1"; 
-    const char* ip_destino = "172.20.10.2"; 
+    const char* ip_destino = "172.20.10.7"; 
     servaddr.sin_addr.s_addr = inet_addr(ip_destino);
     
     uplink_fd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -70,23 +70,51 @@ void DG_DrawFrame() {
     }
 
     if (modo_video == 0) {
-        uint8_t pkt[8000];
+        //delta por filas + RLE
+        uint8_t pkt[1500];
         int pkt_size = 0;
         int es_iframe = (frame_counter % 30 == 0); 
 
         for (int fila = 0; fila < 200; fila++) {
             if (es_iframe || memcmp(buffer_comprimido + (fila * 320), buffer_anterior_hd + (fila * 320), 320) != 0) {
-                pkt[pkt_size++] = fila; 
-                memcpy(&pkt[pkt_size], buffer_comprimido + (fila * 320), 320);
-                pkt_size += 320;
+                
+                uint8_t rle_buffer[640];
+                int rle_idx = 0;
+                uint8_t *row_data = buffer_comprimido + (fila * 320);
 
-                if (pkt_size + 321 > 8000 || fila == 199) {
-                    if (pkt_size > 0) {
-                        sendto(sockfd, pkt, pkt_size, 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
-                        pkt_size = 0;
+                //RLE
+                uint8_t current_color = row_data[0];
+                uint8_t count = 1;
+
+                for (int i = 1; i < 320; i++) {
+                    if (row_data[i] == current_color && count < 255) {
+                        count++;
+                    } else {
+                        rle_buffer[rle_idx++] = count;
+                        rle_buffer[rle_idx++] = current_color;
+                        current_color = row_data[i];
+                        count = 1;
                     }
                 }
+                rle_buffer[rle_idx++] = count;
+                rle_buffer[rle_idx++] = current_color;
+
+                if (pkt_size + 3 + rle_idx > 1000) {
+                    sendto(sockfd, pkt, pkt_size, 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
+                    pkt_size = 0;
+                }
+
+                pkt[pkt_size++] = fila;                         
+                pkt[pkt_size++] = (rle_idx >> 8) & 0xFF;          
+                pkt[pkt_size++] = rle_idx & 0xFF;                 
+                
+                memcpy(&pkt[pkt_size], rle_buffer, rle_idx);
+                pkt_size += rle_idx;
             }
+        }
+        
+        if (pkt_size > 0) {
+            sendto(sockfd, pkt, pkt_size, 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
         }
         
         uint8_t eof_pkt[1] = {253};
