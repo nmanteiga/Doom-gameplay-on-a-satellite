@@ -50,7 +50,7 @@ Además, también tuvimos problemas configurando el Doom y los controles, que al
 
 También nos volvimos locos a las tantas de la madrugada calculando mal la media de ancho de banda en la terminal... nos salían picos de 200.000 bytes hasta que nos dimos cuenta de que estábamos sumando los datos dos veces en el bucle.
 
-## Accomplishments that we're proud of
+## Accomplishments that we're proud of
 Estamos en general muy orgullosos del proyecto completo, pero sobre todo de los resultados matemáticos: al final de nuestra misión de prueba, el reporte final de telemetría demostró que pasamos de enviar 64.000 bytes por frame a una media de 9.520 bytes. Eso es un 85% de ahorro de ancho de banda manteniendo la jugabilidad a 30 FPS.
 
 También estamos súper orgullosos de lo visual que es el proyecto. Pasar del modo ventana en HD a la terminal verde en ASCII con solo pulsar un botón (la tecla 'm'), y ver cómo los bytes de consumo se desploman en vivo en el panel, es una demostración técnica que parece magia.
