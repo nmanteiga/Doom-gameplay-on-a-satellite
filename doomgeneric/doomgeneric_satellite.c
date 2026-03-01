@@ -1,3 +1,12 @@
+/*
+ * DOOM Satellite Link
+ * Copyright (C) 2026 Naiara Manteiga and Xian Lens
+ * * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ */
+
 #include "doomkeys.h"
 #include "m_argv.h"
 #include "doomgeneric.h"
